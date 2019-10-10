@@ -21,8 +21,6 @@ class VQVAE:
         So, it is like this:
         the num_embed is like we recongnize all experience we enconter into several kind of situations. i.e. all 2000 pics to 10 kind of classes.
         the embedding_dim, is the memory we like to spend to memorize the classed. The more we spend, the more details model can remember.
-
-
         """
         # print("_num_embeddings:", self._num_embeddings)
         # print("self._embedding_dim:", self._embedding_dim)
@@ -92,7 +90,6 @@ class VQVAE:
 
     def temperature_sampler(self, distance, temperature):
         '''
-
         :param distance: (batch,h*w ,k)
         0: argmin
         1: update all
@@ -132,7 +129,11 @@ class VQVAE:
         with tf.control_dependencies([
             tf.Assert(tf.equal(input_shape[-1], self._embedding_dim*self.partition),
                       [input_shape])]):
-            flat_inputs = tf.reshape(inputs, [-1, input_shape[1] * input_shape[2], self._embedding_dim]) # batch_size*partition, W*H, self_embedding_dim(partitioned)
+
+            flat_inputs = tf.reshape(inputs, [-1, input_shape[1] * input_shape[2], self.partition,self._embedding_dim])
+            flat_inputs = tf.transpose(flat_inputs,[0,2,1,3])
+
+            flat_inputs = tf.reshape(flat_inputs, [-1, input_shape[1] * input_shape[2], self._embedding_dim]) # batch_size*partition, W*H, self_embedding_dim(partitioned)
             print("flat_inputs:", flat_inputs)
 
 
@@ -287,12 +288,12 @@ class VQVAE:
         non_max_quantized_embd_out = self.quantize(non_max_encoding_indices)
 
         # print("non_max_quantized_embd_out:",    non_max_quantized_embd_out)
-        non_max_quantized_embd_out = tf.reshape(non_max_quantized_embd_out, [tf.shape(inputs)[0],
+        non_max_quantized_embd_out = tf.reshape(non_max_quantized_embd_out, [tf.shape(inputs)[0],self.partition,
                                                                              tf.shape(inputs)[1],
-                                                                             tf.shape(inputs)[2],
-                                                                             non_max_quantized_embd_out.get_shape().as_list()[2]*self.partition]) # reverse partition
+                                                                             tf.shape(inputs)[2],-1])
 
-
+        non_max_quantized_embd_out = tf.transpose(non_max_quantized_embd_out,[0,2,3,1,4])
+        non_max_quantized_embd_out = tf.reshape(non_max_quantized_embd_out,tf.shape(inputs))
 
         print("non_max_quantized_embd_out:", non_max_quantized_embd_out)
 
