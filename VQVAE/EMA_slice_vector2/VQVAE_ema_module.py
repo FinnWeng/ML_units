@@ -50,7 +50,7 @@ class VQVAE:
             self.sampling_temperature = tf.Variable(self.start_temp, dtype=tf.float32, name="sampling_decay_temp")
 
     def input_slicing(self, inputs,input_shape):
-        flat_inputs = tf.reshape(inputs, [-1, input_shape[1] * input_shape[2],self.partition ,self.part_embd_dim]) # batch_size, partition, W*H, self_embedding_dim(partitioned)
+        flat_inputs = tf.reshape(inputs, [-1, input_shape[1] * input_shape[2],self.partition ,self.part_embd_dim])
         # inputs_flat = [batch_size, latent_dim, hidden_size]
         # x_shape = [batch_size, latent_dim, num_blocks,block_dim]
         return flat_inputs
@@ -176,10 +176,7 @@ class VQVAE:
 
         input_shape = tf.shape(inputs)
         with tf.control_dependencies([tf.Assert(tf.equal(input_shape[-1], self._embedding_dim),[input_shape])]):
-            
-            # flat_inputs = tf.reshape(inputs, [-1, input_shape[1] * input_shape[2],self._embedding_dim]) # batch_size, partition, W*H, self_embedding_dim(partitioned)
             sliced_inputs = self.input_slicing(inputs,input_shape)
-
             print("sliced_inputs:", sliced_inputs)
 
 
@@ -189,17 +186,17 @@ class VQVAE:
 
         # the _w is already qunatized: for each row, each idx(latent variable digit) have its own value to pass, value pf _w is quantized embd ouput
 
-        x = tf.reshape(sliced_inputs,[-1,sliced_inputs.shape[-2],sliced_inputs.shape[-1]])
+        x = tf.reshape(sliced_inputs,[-1,sliced_inputs.shape[-2],sliced_inputs.shape[-1]]) # batch*h*w ,self.partition ,self.part_embd_dim
         print("x:", x)
         x_norm_sq = tf.reduce_sum(tf.square(x), axis=-1, keep_dims=True)
         print("x_norm_sq:",x_norm_sq)
-        means_norm_sq = tf.reduce_sum(tf.square(self._w), axis=-1, keep_dims=True)
+        means_norm_sq = tf.reduce_sum(tf.square(self._w), axis=-1, keep_dims=True) # self.partition, self.part_k, self.part_embd_dim
         print("means_norm_sq:",means_norm_sq)
-        scalar_prod = tf.matmul(tf.transpose(x, perm=[1, 0, 2]), tf.transpose(self._w, perm=[0, 2, 1]))
-        print("scalar_prod:",scalar_prod)
+        scalar_prod = tf.matmul(tf.transpose(x, perm=[1, 0, 2]), tf.transpose(self._w, perm=[0, 2, 1]))# (self.partition, batch*h*w, self.part_embd_dim),(self.partition, self.part_embd_dim,self.part_k)
+        print("scalar_prod:",scalar_prod) 
         scalar_prod = tf.transpose(scalar_prod, perm=[1, 0, 2])
         print("scalar_prod:",scalar_prod)
-        distances = x_norm_sq + tf.transpose(means_norm_sq, perm=[2, 0, 1]) - 2 * scalar_prod
+        distances = x_norm_sq + tf.transpose(means_norm_sq, perm=[2, 0, 1]) - 2 * scalar_prod # batch*h*w,self.partition, self.part_k
         print("distances:",distances)
 
 
@@ -231,9 +228,9 @@ class VQVAE:
         print("non_max_quantized_embd_out:",    non_max_quantized_embd_out)
         non_max_quantized_embd_out = tf.reshape(non_max_quantized_embd_out, [tf.shape(inputs)[0],
                                                                              tf.shape(inputs)[1],
-                                                                             tf.shape(inputs)[2],
-                                                                             non_max_quantized_embd_out.get_shape().as_list()[2]*self.partition]) # reverse partition
-
+                                                                             tf.shape(inputs)[2],self.partition,self.part_embd_dim])# reverse partition #1
+                                                                              
+        non_max_quantized_embd_out = tf.reshape(non_max_quantized_embd_out,tf.shape(inputs))# reverse partition #2
 
 
         print("non_max_quantized_embd_out:", non_max_quantized_embd_out)
