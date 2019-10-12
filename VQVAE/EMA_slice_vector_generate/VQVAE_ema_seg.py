@@ -13,10 +13,10 @@ if __name__ == "__main__":
 
     # hyperparameter
     EPOCH = 5000
-    STEP = 2000
+    STEP = 200
     time_set = "0704"
     BATCH_SIZE = 32
-    LATENT_SIZE = 1024
+    LATENT_SIZE = 256
     LATENT_BASE = 128
     FILTER_NUM = 32
     LR = 1e-4
@@ -30,12 +30,19 @@ if __name__ == "__main__":
 
     (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
 
+    top_distribution_list = []
+    bottom_distribution_list = []
+
 
     # create session
     config = tf.ConfigProto()
-    config.gpu_options.allow_growth = False
+    config.gpu_options.allow_growth = True
 
     VaeModel = model.MODEL(LR, FILTER_NUM, BATCH_SIZE, LATENT_SIZE, LATENT_BASE, ATTENTION_HEAD_NUM)
+    #  LR, filter_num, batch_size, latent_size, latent_base, attention_head_num
+
+
+            
 
     learning_figures = [tf.summary.scalar("loss", VaeModel.loss),
                 # tf.summary.scalar("top_VQ_loss", VaeModel.top_VQ_loss),
@@ -74,10 +81,10 @@ if __name__ == "__main__":
                 print("np.min(data_img)",np.min(data_img))
 
 
-                _, train_loss, gray_data, reconstruct_img,reg_recon_out, logpx_z, top_VQ_w, \
-                bottom_VQ_w, top_VQ_temp, bottom_VQ_temp,top_k_idx,top_pixel_wise_embedding_count,bottom_pixel_wise_embedding_count,summary = sess.run(
+                _, train_loss, gray_data, reconstruct_img, logpx_z, top_VQ_w, \
+                bottom_VQ_w, top_VQ_temp, bottom_VQ_temp,top_k_idx,top_pixel_wise_embedding_count,bottom_pixel_wise_embedding_count,top_codebook,bottom_codebook,summary = sess.run(
                     [VaeModel.train_op, VaeModel.loss, VaeModel.gray_data_img,
-                     VaeModel.recon_output,VaeModel.reg_recon_out, VaeModel.logpx_z,
+                     VaeModel.recon_output, VaeModel.logpx_z,
                      VaeModel.top_VQ_assign_moving_avg_op,
                      VaeModel.bottom_VQ_assign_moving_avg_op,
                      VaeModel.top_VQ_temp_decay_op,
@@ -85,16 +92,24 @@ if __name__ == "__main__":
                      VaeModel.top_k_idx,
                      VaeModel.top_pixel_wise_embedding_count,
                      VaeModel.bottom_pixel_wise_embedding_count,
+                     VaeModel.top_codebook,
+                     VaeModel.bottom_codebook,
                      merged_summary_op
                      ], feed_dict={VaeModel.data_img_holder: data_img})
                 
                 
-
+                print("reconstruct_img.shape:",reconstruct_img.shape)
                 print("np.max(reconstruct_img):",np.max(reconstruct_img))
                 print("np.min(reconstruct_img)",np.min(reconstruct_img))
-                print("np.max(reg_recon_out)",np.max(reg_recon_out))
-                print("np.min(reg_recon_out)",np.min(reg_recon_out))
                 print("VaeModel.top_pixel_wise_embedding_count:",top_pixel_wise_embedding_count.shape)
+                print("top_codebook:",top_codebook.shape)
+
+                if len(top_distribution_list) >= 1:
+                    top_distribution_list.pop(0)
+                    bottom_distribution_list.pop(0)
+
+                top_distribution_list.append(top_pixel_wise_embedding_count)
+                bottom_distribution_list.append(bottom_pixel_wise_embedding_count)
 
                 
 
@@ -102,24 +117,16 @@ if __name__ == "__main__":
 
 
 
-                ### Gradient Based update
-                # _, train_loss, gray_data, reconstruct_img, logpx_z= sess.run(
-                #     [VaeModel.train_op, VaeModel.loss, VaeModel.gray_data_img,
-                #      VaeModel.recon_output, VaeModel.logpx_z,
-                #      ], feed_dict={VaeModel.data_img_holder: data_img})
 
-                # print("top_VQ_w:",top_VQ_w[0])
-                # print("reconstruct_img:",reconstruct_img.shape)
-
-                print("tf.reduce_mean(tf.reduce_sum(flat_inputs,axis=-1)):", top_VQ_w[6])
-                print("tf.reduce_sum(update_or_not):", top_VQ_w[2])
-                print("self.take_num",top_VQ_w[7])
-                print("tf.math.top_k(self.embedding_total_count:", top_VQ_w[3])
-                print("tf.reduce_sum(embedding_count):", top_VQ_w[4])
-                # print("tf.math.top_k(embedding_count,k=10):", top_VQ_w[5])
-                print("top_VQ_temp;", top_VQ_temp)
-                print("bottom_VQ_temp:", bottom_VQ_temp)
-                print("top_k_idx:",top_k_idx)
+                # print("tf.reduce_mean(tf.reduce_sum(flat_inputs,axis=-1)):", top_VQ_w[6])
+                # print("tf.reduce_sum(update_or_not):", top_VQ_w[2])
+                # print("self.take_num",top_VQ_w[7])
+                # print("tf.math.top_k(self.embedding_total_count:", top_VQ_w[3])
+                # print("tf.reduce_sum(embedding_count):", top_VQ_w[4])
+                # # print("tf.math.top_k(embedding_count,k=10):", top_VQ_w[5])
+                # print("top_VQ_temp;", top_VQ_temp)
+                # print("bottom_VQ_temp:", bottom_VQ_temp)
+                # print("top_k_idx:",top_k_idx)
 
 
 
@@ -128,7 +135,7 @@ if __name__ == "__main__":
                 # print("show_img.shape:", show_img.shape)
 
                 show_img = show_img.reshape([56,-1])
-                # print("show_img.shape:", show_img.shape)
+                print("show_img.shape:", show_img.shape)
                 # plot1 = plt.figure(1)
                 # plt.clf()
                 # plot1.suptitle('EMA_test', fontsize=20)
@@ -137,7 +144,7 @@ if __name__ == "__main__":
                 
                 plt.imsave("./img/" + "epoch_" + str(e) + "_train_step_" + str(step).zfill(5) + ".jpg",show_img)
                 # plt.imshow(show_img)
-                plt.pause(0.000001)
+                # plt.pause(0.000001)
 
                 # print("cross_entropy:", cross_entropy, "R_cross_entropy:", R_cross_entropy, "G_cross_entropy:",
                 #       G_cross_entropy, "B_cross_entropy:", B_cross_entropy, "logpx_z:", logpx_z, "segloss:", segloss,
@@ -147,3 +154,22 @@ if __name__ == "__main__":
                 print("epoch:{} , step:{} , loss:{}".format(e, step, train_loss))
                 summary_writer.add_summary(summary, global_step=update_count)
                 update_count += 1
+            
+            print("np.array(top_distribution_list)",np.array(top_distribution_list).shape)
+            
+            top_distribution = sess.run(tf.reduce_mean(np.array(top_distribution_list)/tf.reduce_sum(np.array(top_distribution_list),axis=[1,2,3],keepdims=True),axis=0))
+            bottom_distribution = sess.run(tf.reduce_mean(np.array(bottom_distribution_list)/tf.reduce_sum(np.array(bottom_distribution_list),axis=[1,2,3],keepdims=True),axis=0))
+            # print("is the sum 1?:",sess.run(tf.reduce_sum(top_distribution)))
+            # print("top_distribution.shape:",top_distribution.shape)
+            # print("bottom_distribution:",bottom_distribution.shape)
+            # print("top_codebook:",top_codebook.shape)
+            # print("bottom_codebook:",bottom_codebook.shape)
+
+            feed_dict={VaeModel.top_codebook_holder:top_codebook,VaeModel.bottom_codebook_holder:bottom_codebook,VaeModel.top_distribution_holder:top_distribution,VaeModel.bottom_distribution_holder:bottom_distribution}
+
+            generated_sample = sess.run(VaeModel.sampling_recon_output,feed_dict=feed_dict)
+            generated_sample_shape = generated_sample.shape
+            print("generated_sample:",generated_sample_shape)
+            generated_sample = np.reshape(generated_sample,[-1,generated_sample_shape[2]])
+            print("generated_sample:",generated_sample.shape)
+            plt.imsave("./sampling_img/" + "epoch_" + str(e) + "_train_step_" + str(step).zfill(5) + ".jpg",generated_sample)

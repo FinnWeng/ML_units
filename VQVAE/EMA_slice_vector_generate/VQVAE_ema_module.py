@@ -107,7 +107,6 @@ class VQVAE:
         top_k_idx = tf.math.top_k(-distance, k=tf.cast(self.take_num,tf.int32), sorted=False, name=None)[1]
         self.top_k_idx = top_k_idx
 
-
         return top_k_idx
 
     def quantize(self, encoding_indices):

@@ -54,6 +54,8 @@ class MODEL:
         self.latent_base = latent_base
         self.kernel = tf.keras.initializers.glorot_normal()
         self.attention_head_num = attention_head_num
+        self.partition = 8
+        self.sampling_number = 10
 
         global_step = tf.Variable(0, trainable=False)
 
@@ -70,6 +72,10 @@ class MODEL:
         # self.data_img_holder = tf.multiply(data_img_holder,1/255,"input_regularize")
         self.data_img_holder = tf.placeholder(tf.float32, [None, 28, 28, 1], "default_data_img_holder")
         self.reg_data_img_holder = self.data_img_holder/255
+        self.top_codebook_holder = tf.placeholder(tf.float32, [int(self.latent_base/self.partition), self.latent_size], "top_codebook_holder") #(16, 1024)
+        self.top_distribution_holder = tf.placeholder(tf.float32, [7, 7, self.latent_size], "top_distribution_holder")
+        self.bottom_codebook_holder = tf.placeholder(tf.float32, [int(self.latent_base*2/self.partition), self.latent_size], "bottom_codebook_holder")
+        self.bottom_distribution_holder = tf.placeholder(tf.float32, [14, 14, self.latent_size], "bottom_distribution_holder")
 
         dataset = tf.data.Dataset.from_tensor_slices(self.ori_x)
         dataset = dataset.batch(self.batch_size, drop_remainder=True)
@@ -80,7 +86,12 @@ class MODEL:
 
         self.gray_data_img = self.reg_data_img_holder
 
-        self.main(self.gray_data_img, self.keep_training,self.VQVAE_wrapper,self.VQVAE_wrapper)
+        encoder_ouput = self.encoder(self.gray_data_img)
+        encoder_ouput_shape = encoder_ouput.shape
+
+        self.reg_recon_out,self.recon_output = self.main(encoder_ouput,encoder_ouput_shape, self.keep_training,self.VQVAE_wrapper,self.VQVAE_wrapper)
+
+        _,self.sampling_recon_output = self.main(None,encoder_ouput_shape, self.keep_training,self.sampling_wrapper,self.sampling_wrapper)
 
         self.loss = self.loss_function()
 
@@ -105,8 +116,9 @@ class MODEL:
 
     def VQVAE_wrapper(self,input,name):
         if name == "top":
-            with tf.variable_scope("top_VQVAE"):
+            with tf.variable_scope("top_VQVAE",reuse=tf.AUTO_REUSE):
                 top_VQVAE_instance = VQVAE_ema_module.VQVAE(self.latent_base, self.latent_size, 0.25, "top_VQVAE")
+                #                                           embedding_dim, _num_embeddings, commit_loss_coef, scope
                 top_VQ_out_dict = top_VQVAE_instance.VQVAE_layer(input)
 
                 top_VQ_out = top_VQ_out_dict['quantized_embd_out']
@@ -116,9 +128,12 @@ class MODEL:
                 self.top_VQ_temp_decay_op = top_VQ_out_dict["temp_decay_op"]
                 self.top_k_idx = top_VQ_out_dict["top_k_idx"]
                 self.top_pixel_wise_embedding_count = top_VQVAE_instance.pixel_wise_embedding_count
+                
+                self.top_codebook = top_VQVAE_instance._w
                 return top_VQ_out
         else:
-            with tf.variable_scope("bottom_VQVAE"):
+            print("buill_bottom_VQVAE_wrapper")
+            with tf.variable_scope("bottom_VQVAE",reuse=tf.AUTO_REUSE):
                 bottom_VQVAE_instance = VQVAE_ema_module.VQVAE(self.latent_base * 2, self.latent_size, 0.25,
                                                                "bottom_VQVAE")
                 bottom_VQ_out_dict = bottom_VQVAE_instance.VQVAE_layer(input)
@@ -128,11 +143,42 @@ class MODEL:
                 self.bottom_VQ_assign_moving_avg_op = bottom_VQ_out_dict['assign_moving_avg_op']
                 self.bottom_VQ_temp_decay_op = bottom_VQ_out_dict["temp_decay_op"]
                 self.bottom_pixel_wise_embedding_count = bottom_VQVAE_instance.pixel_wise_embedding_count
+                self.bottom_codebook = bottom_VQVAE_instance._w
                 return bottom_VQ_out
 
 
-    def main(self, img, training_status,top_wrapper,bottom_wrapper):
-        with tf.variable_scope("vea_autoencoder", reuse=tf.AUTO_REUSE):
+    def sampling_wrapper(self,input,name):
+        
+        
+        if name == "top":
+            print("buill_top_sampling_wrapper")
+            # self.top_codebook_holder # [int(self.latent_base/self.partition), self.latent_size], need transpose for look up
+            # self.top_distribution_holder # [7, 7, self.latent_size]
+            dist_shape = tf.shape(self.top_distribution_holder)
+            flat_distribution = tf.reshape(self.top_distribution_holder,[dist_shape[0]*dist_shape[1],dist_shape[2]])
+            sampler = tf.distributions.Categorical(probs=flat_distribution) # p dimension = m => each of m distribution sampling 
+            flat_idx = sampler.sample([self.sampling_number]) # each distribution sampling n times => return n*m => (n,self.latent_size)
+            output = tf.nn.embedding_lookup(tf.transpose(self.top_codebook_holder,[1,0]),flat_idx)
+            print("sampling_output:",output)
+            output = tf.reshape(output,[self.sampling_number,dist_shape[0],dist_shape[1],-1]) # [sampling_number,dist_shape[0],dist_shape[1],int(self.latent_base/self.partition)]
+            print("sampling_output",output)
+            return output
+
+        else:
+            print("buill_bottom_sampling_wrapper")
+            # self.bottom_codebook_holder # [int(self.latent_base/self.partition), self.latent_size]
+            # self.bottom_distribution_holder # [14, 14, self.latent_size]
+            dist_shape = tf.shape(self.bottom_distribution_holder)
+            flat_distribution = tf.reshape(self.bottom_distribution_holder,[dist_shape[0]*dist_shape[1],dist_shape[2]])
+            sampler = tf.distributions.Categorical(probs=flat_distribution) # p dimension = m => each of m distribution sampling 
+            flat_idx = sampler.sample([self.sampling_number]) # each distribution sampling n times => return n*m => (n,self.latent_size)
+            output = tf.nn.embedding_lookup(tf.transpose(self.bottom_codebook_holder,[1,0]),flat_idx)
+            output = tf.reshape(output,[self.sampling_number,dist_shape[0],dist_shape[1],-1]) # [sampling_number,dist_shape[0],dist_shape[1],int(self.latent_base/self.partition)]
+            return output
+
+
+    def encoder(self, img):
+        with tf.variable_scope("encoder", reuse=tf.AUTO_REUSE):
             # l1 output => l8 input
             # l2 output => l7 input
             # l3 output => l6 input
@@ -181,10 +227,22 @@ class MODEL:
             l3_output = tf.keras.layers.Conv2D(self.latent_base, kernel_size=3, strides=1, activation="relu",
                                                padding="SAME",
                                                kernel_initializer=tf.initializers.he_normal())(l3_output)
+            
+            return l3_output
 
-            print("l3_output:", l3_output)
 
-            img_shape = l3_output.shape
+
+
+
+
+    def main(self, enc_input,enc_input_shape, training_status,top_wrapper,bottom_wrapper):
+        with tf.variable_scope("decoder", reuse=tf.AUTO_REUSE):
+
+            l3_output = enc_input
+            
+            print("l3_output:", l3_output) # ?, 7, 7, 128
+
+            img_shape = enc_input_shape
 
             top_VQ_out = top_wrapper(l3_output,"top")
 
@@ -193,6 +251,8 @@ class MODEL:
             # unflatten_ouput = VQ_out
             #
             # print("unflatten_ouput:", unflatten_ouput)
+
+            print("img_shape[-1]:",img_shape[-1])
 
             channel_reconstruct = tf.keras.layers.Dense(img_shape[-1],
                                                         kernel_initializer=tf.keras.initializers.glorot_normal())(
@@ -245,8 +305,10 @@ class MODEL:
                                                kernel_initializer=self.kernel)(l5_output)
             recon_out = tf.keras.layers.Conv2D(1, kernel_size=3, strides=1, padding="SAME",
                                                kernel_initializer=self.kernel, activation="sigmoid")(recon_out)
-            self.reg_recon_out = recon_out
-            self.recon_output = tf.cast(tf.round(recon_out * 255), tf.float32)
+            reg_recon_out = recon_out
+            recon_output = tf.cast(tf.round(recon_out * 255), tf.float32)
+        
+        return reg_recon_out,recon_output
 
         # print("seg_map:", seg_map.shape)
         # print(("recon_out:", recon_out))
