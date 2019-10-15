@@ -124,12 +124,14 @@ if __name__ == "__main__":
 
                 show_img = show_img.reshape([56,-1])
                 # print("show_img.shape:", show_img.shape)
-                plot1 = plt.figure(1)
-                plt.clf()
-                plot1.suptitle('EMA_test', fontsize=20)
-                plot1.suptitle("EMA_test ,epoch:{} , step:{} , loss:{}".format(e, step, train_loss), fontsize=10)
-                plt.imsave("./img/" + "epoch_" + str(e) + "_train_step_" + str(step) + ".jpg",show_img)
-                plt.imshow(show_img)
+                # plot1 = plt.figure(1)
+                # plt.clf()
+                # plot1.suptitle('EMA_test', fontsize=20)
+                # plot1.suptitle("EMA_test ,epoch:{} , step:{} , loss:{}".format(e, step, train_loss), fontsize=10)
+                
+                
+                plt.imsave("./img/" + "epoch_" + str(e) + "_train_step_" + str(step).zfill(5) + ".jpg",show_img)
+                # plt.imshow(show_img)
                 plt.pause(0.000001)
 
                 # print("cross_entropy:", cross_entropy, "R_cross_entropy:", R_cross_entropy, "G_cross_entropy:",
