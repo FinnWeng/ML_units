@@ -61,10 +61,10 @@ class VQVAE:
             
         print("self.embedding_total_count:", self.embedding_total_count)
 
-        expand_flat_inputs = tf.transpose(flat_inputs, [0, 2, 1])
-        print("expand_flat_inputs:", expand_flat_inputs)
+        expand_flat_inputs = tf.transpose(flat_inputs, [0, 2, 1])  # [256,49,16]
+        print("expand_flat_inputs:", expand_flat_inputs) #  [256,16,49]
 
-        input_contrib_per_embedding_value = tf.matmul(expand_flat_inputs, encodings)  # (?, 128, 1024)
+        input_contrib_per_embedding_value = tf.matmul(expand_flat_inputs, encodings)  # [256,16,49] vs [49,49,1024](b*partition, H*W, latent_size),(?, 128, 1024)
         print("input_contrib_per_embedding_value:",input_contrib_per_embedding_value)
         input_contrib_per_embedding_value = tf.reduce_sum(input_contrib_per_embedding_value, axis=[0])
         # input_contrib_per_embedding_value = tf.transpose(input_contrib_per_embedding_value,[1,0])
@@ -130,8 +130,8 @@ class VQVAE:
         with tf.control_dependencies([
             tf.Assert(tf.equal(input_shape[-1], self._embedding_dim*self.partition),
                       [input_shape])]):
-                      flat_inputs = tf.reshape(VQ_input, [-1, input_shape[1] * input_shape[2], self.partition,self._embedding_dim])
-                      flat_inputs = tf.transpose(flat_inputs,[0,2,1,3])
+                      sliced_inputs = tf.reshape(VQ_input, [-1, input_shape[1] * input_shape[2], self.partition,self._embedding_dim])
+                      flat_inputs = tf.transpose(sliced_inputs,[0,2,1,3])
                       flat_inputs = tf.reshape(flat_inputs, [-1, input_shape[1] * input_shape[2], self._embedding_dim]) # batch_size*partition, W*H, self_embedding_dim(partitioned)
                       print("flat_inputs:", flat_inputs) # (batch*partition,H*W,self._embedding_dim) (?, ?, 16)
 
@@ -141,25 +141,72 @@ class VQVAE:
 
         # the _w is already qunatized: for each row, each idx(latent variable digit) have its own value to pass, value pf _w is quantized embd ouput
 
+        # # distance method 1:
+
         # def dist_fn(tensor_apart):
         #     a2 = tf.reduce_sum(tensor_apart ** 2, 1, keepdims=True)
         #     b2 = tf.reduce_sum(self._w ** 2, 0, keepdims=True)
         #     ab = tf.matmul(tensor_apart, self._w)
-        #
+
         #     return a2 - 2 * ab + b2
-        #
-        # distances = tf.map_fn(dist_fn, flat_inputs)
-        # print("distances:", distances)
 
-        def dist_fn(tensor_apart):
-            a2 = tf.reduce_sum(tensor_apart ** 2, 1, keepdims=True)
-            b2 = tf.reduce_sum(self._w ** 2, 0, keepdims=True)
-            ab = tf.matmul(tensor_apart, self._w)
+        # distances_org = tf.map_fn(dist_fn, flat_inputs,parallel_iterations=32) #batch_size*partition, W*H, 1024
+        # # print("distances:", distances) # (batch*partition,H*W,_num_embeddings),(?, ?, 1024)
 
-            return a2 - 2 * ab + b2
 
-        distances = tf.map_fn(dist_fn, flat_inputs) #batch_size*partition, W*H, 1024
-        print("distances:", distances) # (batch*partition,H*W,_num_embeddings),(?, ?, 1024)
+        # # distance method 2:        
+        # def dist_fn(pixelwised_tensor):
+        #     a2 = pixelwised_tensor ** 2
+        #     print("a2:",a2)
+        #     a2 = tf.reduce_sum(pixelwised_tensor ** 2, 1, keepdims=True) # batch*partition,self._embedding_dim => batch*partition,1
+        #     print("a2:",a2)
+        #     b2 = self._w ** 2
+        #     print("b2:",b2)
+        #     b2 = tf.reduce_sum(self._w ** 2, 0, keepdims=True) # self._embedding_dim, self._num_embeddings => 1,self._num_embeddings 
+        #     print("b2:",b2)
+        #     ab = tf.matmul(pixelwised_tensor,self._w) # batch*partition * self._num_embeddings
+        #     print("ab:",ab)
+        #     print("a2 - 2 * ab + b2:",(a2 - 2 * ab + b2))
+        #     return a2 - 2 * ab + b2 # (?,self._num_embeddings)
+        
+        # trans_flat_inputs = tf.transpose(flat_inputs,[1,0,2])
+
+        # H_W = VQ_input.get_shape().as_list()[1]*VQ_input.get_shape().as_list()[2]
+        # trans_distances = tf.stack([dist_fn(pixelwised_tensor=trans_flat_inputs[i,:,:]) for i in range(H_W)],axis=0)# H*W, batch*partition,_num_embeddings
+        # print("trans_distances:",trans_distances)
+        # distances = tf.transpose(trans_distances,[1,0,2])# H*W, batch*partition,_num_embeddings
+        # print("distances:",distances)
+
+
+        # distance method 3:  
+
+        multi_w = tf.stack([tf.transpose(self._w,[1,0]) for x in range(self.partition)],axis=0)
+        print("multi_w:",multi_w)
+        H_W = VQ_input.get_shape().as_list()[1]*VQ_input.get_shape().as_list()[2]
+
+        x = tf.reshape(sliced_inputs,[-1,self.partition ,self._embedding_dim]) # batch*h*w ,self.partition ,self.part_embd_dim
+        print("x:", x)
+        x_norm_sq = tf.reduce_sum(tf.square(x), axis=-1, keep_dims=True)
+        print("x_norm_sq:",x_norm_sq)
+        means_norm_sq = tf.reduce_sum(tf.square(multi_w), axis=-1, keep_dims=True) # self.partition, self.part_k, self.part_embd_dim
+        print("means_norm_sq:",means_norm_sq)
+        scalar_prod = tf.matmul(tf.transpose(x, perm=[1, 0, 2]), tf.transpose(multi_w, perm=[0, 2, 1]))# (self.partition, batch*h*w, self.part_embd_dim),(self.partition, self.part_embd_dim,self.part_k)
+        print("scalar_prod:",scalar_prod) 
+        scalar_prod = tf.transpose(scalar_prod, perm=[1, 0, 2])
+        print("scalar_prod:",scalar_prod)
+        trans_distances = x_norm_sq + tf.transpose(means_norm_sq, perm=[2, 0, 1]) - 2 * scalar_prod # batch*h*w,self.partition, self.part_k
+        print("trans_distances:",trans_distances)
+        trans_distances = tf.reshape(trans_distances,[-1,H_W,self.partition,self._num_embeddings])
+        distances = tf.transpose(trans_distances,[0,2,1,3]) # batch,self.partition,h*w, self.part_k
+        distances = tf.reshape(distances,[-1,H_W,self._num_embeddings])
+
+        print("distances:",distances)
+
+        # self.verf_dist_same = tf.reduce_max(tf.square((distances_org-distances)))
+
+
+
+          
 
         ####
         #### EMA Moving average(non max)
@@ -175,8 +222,11 @@ class VQVAE:
         same_idx =tf.reduce_sum(tf.cast(tf.equal(non_max_encoding_indices,tf.cast(encoding_indices,tf.int32)),tf.float32))
 
 
+        # multi_hot_encodings = tf.map_fn(lambda x: tf.reduce_sum(tf.one_hot(x, self._num_embeddings), axis=-2),
+        #                                 tf.transpose(non_max_encoding_indices, perm=[1, 0, 2]), dtype=tf.float32)
         multi_hot_encodings = tf.map_fn(lambda x: tf.reduce_sum(tf.one_hot(x, self._num_embeddings), axis=-2),
-                                        tf.transpose(non_max_encoding_indices, perm=[1, 0, 2]), dtype=tf.float32)
+                                tf.transpose(non_max_encoding_indices, perm=[1, 0, 2]), dtype=tf.float32)
+            
         multi_hot_encodings = tf.transpose(multi_hot_encodings, perm=[1, 0, 2])
         print("multi_hot_encodings:", multi_hot_encodings) # (b*partition, H*W, latent_size)
 
