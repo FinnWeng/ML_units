@@ -55,7 +55,7 @@ class VQVAE:
 
         # embedding_total_count_temp = tf.math.floordiv(
         #     tf.cast(self.embedding_total_count, tf.float32) * (self.gamma) + embedding_count * (1 - self.gamma))
-        self.embedding_total_count -= update_or_not * (
+        self.embedding_total_count -= (
             (1 - self.gamma) * (self.embedding_total_count - tf.cast(embedding_count,tf.float32)))
 
             
@@ -73,7 +73,7 @@ class VQVAE:
                                                                                         tf.float32)
         print("input_contrib_per_embedding_value:", input_contrib_per_embedding_value)
 
-        w_defference = (1 - self.gamma) * (self._w - input_contrib_per_embedding_value) * update_or_not
+        w_defference = (1 - self.gamma) * (self._w - input_contrib_per_embedding_value) 
         # print("w_defference:", w_defference)
 
         self._w -= w_defference
