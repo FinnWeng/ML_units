@@ -107,6 +107,8 @@ if __name__ == "__main__":
                 # print("reconstruct_img:",reconstruct_img.shape)
 
                 print("tf.reduce_mean(tf.reduce_sum(flat_inputs,axis=-1)):", top_VQ_w[6])
+                print("tf.reduce_mean(self._w) top:",top_VQ_w[1]) # # to see if self_w all decrease to zero: seem not
+                print("tf.reduce_mean(self._w) bottom:",bottom_VQ_w[1]) # # to see if self_w all decrease to zero: seem not
                 print("tf.reduce_sum(update_or_not):", top_VQ_w[2])
                 print("self.take_num",top_VQ_w[7])
                 print("tf.math.top_k(self.embedding_total_count:", top_VQ_w[3])

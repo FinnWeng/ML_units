@@ -3,7 +3,7 @@ import tensorflow as tf
 import math
 import numpy as np
 from functools import partial
-import VQVAE_ema_module
+import VQVAE_ema_google_slicing_module as VQVAE_ema_module
 
 class CoordConv2D:
     def __init__(self, with_r = False):
@@ -124,7 +124,7 @@ class MODEL:
             l1_output = tf.keras.layers.Conv2D(self.filter_num, kernel_size=3, strides=1,
                                                    padding="SAME",
                                                    kernel_initializer=self.kernel)(img)
-            l1_output = tf.keras.layers.Conv2D(self.filter_num, kernel_size=3, strides=1, activation="relu",
+            l1_output = tf.keras.layers.Conv2D(self.filter_num, kernel_size=3, strides=1, activation="tanh",
                                                    padding="SAME",
                                                    kernel_initializer=self.kernel)(l1_output)
 
@@ -138,7 +138,7 @@ class MODEL:
             l2_output = tf.keras.layers.Conv2D(self.filter_num * 2, kernel_size=3, strides=1,
                                                padding="SAME",
                                                kernel_initializer=self.kernel)(l2_raw_output)
-            l2_output = tf.keras.layers.Conv2D(self.filter_num * 2, kernel_size=3, strides=1, activation="relu",
+            l2_output = tf.keras.layers.Conv2D(self.filter_num * 2, kernel_size=3, strides=1, activation="tanh",
                                                padding="SAME",
                                                kernel_initializer=self.kernel)(l2_output)
             print("l2_output:", l2_output)
@@ -150,7 +150,7 @@ class MODEL:
             l3_output = tf.keras.layers.Conv2D(self.filter_num * 3, kernel_size=3, strides=1,
                                                padding="SAME",
                                                kernel_initializer=self.kernel)(l3_raw_output)
-            l3_output = tf.keras.layers.Conv2D(self.latent_base, kernel_size=3, strides=1, activation="relu",
+            l3_output = tf.keras.layers.Conv2D(self.latent_base, kernel_size=3, strides=1, activation="tanh",
                                                padding="SAME",
                                                kernel_initializer=tf.initializers.he_normal())(l3_output)
 
@@ -160,8 +160,8 @@ class MODEL:
 
 
             with tf.variable_scope("top_VQVAE"):
-                top_VQVAE_instance = VQVAE_ema_module.VQVAE(self.latent_base, self.latent_size, 0.25, "top_VQVAE")
-                top_VQ_out_dict = top_VQVAE_instance.VQVAE_layer(l3_output)
+                top_VQVAE_instance = VQVAE_ema_module.VQVAE(l3_output, self.latent_size, 0.25, 8, "top_VQVAE")
+                top_VQ_out_dict = top_VQVAE_instance.VQVAE_layer_out()
 
             top_VQ_out = top_VQ_out_dict['quantized_embd_out']
             self.top_VQ_loss = top_VQ_out_dict["VQ_loss"]
@@ -197,12 +197,12 @@ class MODEL:
 
             bottom_input = tf.concat([l4_output, resize_top_VQ_out], axis=3)
 
-            bottom_input = tf.keras.layers.Dense(bottom_input.get_shape().as_list()[-1],activation="relu", kernel_initializer=tf.initializers.he_normal())(bottom_input)
+            bottom_input = tf.keras.layers.Dense(bottom_input.get_shape().as_list()[-1],activation="tanh", kernel_initializer=tf.initializers.he_normal())(bottom_input)
 
             with tf.variable_scope("bottom_VQVAE"):
-                bottom_VQVAE_instance = VQVAE_ema_module.VQVAE(self.latent_base * 2, self.latent_size, 0.25,
+                bottom_VQVAE_instance = VQVAE_ema_module.VQVAE(bottom_input, self.latent_size, 0.25,8,
                                                                "bottom_VQVAE")
-                bottom_VQ_out_dict = bottom_VQVAE_instance.VQVAE_layer(bottom_input)
+                bottom_VQ_out_dict = bottom_VQVAE_instance.VQVAE_layer_out()
             bottom_VQ_out = bottom_VQ_out_dict['quantized_embd_out']
             self.bottom_VQ_loss = bottom_VQ_out_dict["VQ_loss"]
             self.bottom_VQ_encodings = bottom_VQ_out_dict["encodings"]
@@ -222,7 +222,7 @@ class MODEL:
             l5_output = tf.keras.layers.Conv2D(self.filter_num * 1, kernel_size=3, strides=1,
                                                padding="SAME",
                                                kernel_initializer=self.kernel)(l5_raw_output)
-            l5_output = tf.keras.layers.Conv2D(self.filter_num * 1, kernel_size=3, strides=1, activation="relu",
+            l5_output = tf.keras.layers.Conv2D(self.filter_num * 1, kernel_size=3, strides=1, activation="tanh",
                                                padding="SAME",
                                                kernel_initializer=self.kernel)(l5_output)
 
