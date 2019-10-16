@@ -113,14 +113,23 @@ class VQVAE:
         return top_k_idx
 
     def quantize(self, encoding_indices):
+
         # encoding_indices:(b*partition,H*W,top_k)
-        w = tf.transpose(self._w, [1, 0])
-        
-        quantize = tf.map_fn(
-            lambda x: tf.reduce_mean(tf.nn.embedding_lookup(w, x, validate_indices=False), axis=-2), encoding_indices,
-            dtype=tf.float32)  # (b*partition, h*w, top_k_vector) => (b*partition)*(h*w, top_k_vector) => (b*partition)*(h*w, top_k_vector,dim) => (b*partition)*(h*w,dim) => (b*partition, h*w,dim)
+        trans_idx = tf.transpose(encoding_indices,[1,0,2])
+        trans_w = tf.transpose(self._w, [1, 0])
+
+        trans_quantize = tf.stack([tf.reduce_mean(tf.nn.embedding_lookup(trans_w, trans_idx[i,:,:], validate_indices=False), axis=-2) for i in range(self.H_W)],axis=0)
+        print("trans_quantize:",trans_quantize)
+        quantize = tf.transpose(trans_quantize,[1,0,2])
+        print("quantize:",quantize)
+        # quantize = tf.map_fn(
+        #     lambda x: tf.reduce_mean(tf.nn.embedding_lookup(trans_w, x, validate_indices=False), axis=-2), encoding_indices,
+        #     dtype=tf.float32)  # (b*partition, h*w, top_k_vector) => (b*partition)*(h*w, top_k_vector) => (b*partition)*(h*w, top_k_vector,dim) => (b*partition)*(h*w,dim) => (b*partition, h*w,dim)
 
         return quantize  # (b,h*w,dim)
+
+
+
 
     def VQVAE_builder(self, VQ_input):
         # Assert last dimension is same as self._embedding_dim
@@ -182,7 +191,7 @@ class VQVAE:
 
         multi_w = tf.stack([tf.transpose(self._w,[1,0]) for x in range(self.partition)],axis=0)
         print("multi_w:",multi_w)
-        H_W = VQ_input.get_shape().as_list()[1]*VQ_input.get_shape().as_list()[2]
+        self.H_W = VQ_input.get_shape().as_list()[1]*VQ_input.get_shape().as_list()[2]
 
         x = tf.reshape(sliced_inputs,[-1,self.partition ,self._embedding_dim]) # batch*h*w ,self.partition ,self.part_embd_dim
         print("x:", x)
@@ -196,9 +205,9 @@ class VQVAE:
         print("scalar_prod:",scalar_prod)
         trans_distances = x_norm_sq + tf.transpose(means_norm_sq, perm=[2, 0, 1]) - 2 * scalar_prod # batch*h*w,self.partition, self.part_k
         print("trans_distances:",trans_distances)
-        trans_distances = tf.reshape(trans_distances,[-1,H_W,self.partition,self._num_embeddings])
+        trans_distances = tf.reshape(trans_distances,[-1,self.H_W,self.partition,self._num_embeddings])
         distances = tf.transpose(trans_distances,[0,2,1,3]) # batch,self.partition,h*w, self.part_k
-        distances = tf.reshape(distances,[-1,H_W,self._num_embeddings])
+        distances = tf.reshape(distances,[-1,self.H_W,self._num_embeddings])
 
         print("distances:",distances)
 
