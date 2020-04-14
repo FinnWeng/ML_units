@@ -32,7 +32,7 @@ if __name__ == "__main__":
 
 
     # create session
-    config = tf.ConfigProto(allow_soft_placement=True)
+    config = tf.ConfigProto()
     config.gpu_options.allow_growth = False
 
     VaeModel = model.MODEL(LR, FILTER_NUM, BATCH_SIZE, LATENT_SIZE, LATENT_BASE, ATTENTION_HEAD_NUM)
@@ -48,7 +48,7 @@ if __name__ == "__main__":
 
     saver = tf.train.Saver(max_to_keep=10)
 
-    with tf.Session() as sess:
+    with tf.Session(config = config) as sess:
         init_op = tf.global_variables_initializer()
         sess.run(init_op)
 
@@ -107,6 +107,8 @@ if __name__ == "__main__":
                 # print("reconstruct_img:",reconstruct_img.shape)
 
                 print("tf.reduce_mean(tf.reduce_sum(flat_inputs,axis=-1)):", top_VQ_w[6])
+                print("tf.reduce_mean(self._w) top:",top_VQ_w[1]) # # to see if self_w all decrease to zero: seem not
+                print("tf.reduce_mean(self._w) bottom:",bottom_VQ_w[1]) # # to see if self_w all decrease to zero: seem not
                 print("tf.reduce_sum(update_or_not):", top_VQ_w[2])
                 print("self.take_num",top_VQ_w[7])
                 print("tf.math.top_k(self.embedding_total_count:", top_VQ_w[3])
@@ -124,12 +126,14 @@ if __name__ == "__main__":
 
                 show_img = show_img.reshape([56,-1])
                 # print("show_img.shape:", show_img.shape)
-                plot1 = plt.figure(1)
-                plt.clf()
+                # plot1 = plt.figure(1)
+                # plt.clf()
                 # plot1.suptitle('EMA_test', fontsize=20)
-                plot1.suptitle("EMA_test_multi_codebook ,epoch:{} , step:{} , loss:{}".format(e, step, train_loss), fontsize=10)
-                plt.imsave("./img/" + "epoch_" + str(e) + "_train_step_" + str(step) + ".jpg",show_img)
-                plt.imshow(show_img)
+                # plot1.suptitle("EMA_test ,epoch:{} , step:{} , loss:{}".format(e, step, train_loss), fontsize=10)
+                
+                
+                plt.imsave("./img/" + "epoch_" + str(e) + "_train_step_" + str(step).zfill(5) + ".jpg",show_img)
+                # plt.imshow(show_img)
                 plt.pause(0.000001)
 
                 # print("cross_entropy:", cross_entropy, "R_cross_entropy:", R_cross_entropy, "G_cross_entropy:",
