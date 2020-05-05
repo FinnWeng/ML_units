@@ -192,7 +192,7 @@ def make_aug_data_and_dataset(target_data,target_label,fn_list):
                 a_x = tf.data.Dataset.from_tensor_slices(target_data)
                 b_x = tf.data.Dataset.from_tensor_slices(target_data)
                 a_x = a_x.map(fn_list[i])
-                a_x = b_x.map(fn_list[current_start+1])
+                b_x = b_x.map(fn_list[current_start+1])
 
                 label_tmp = tf.data.Dataset.from_tensor_slices(target_label)
                 label_tmp = label_tmp.map(to_one_hot)
@@ -251,8 +251,8 @@ if __name__ == "__main__":
             tf.config.experimental.set_memory_growth(gpu, True)
 
 
-    # log_dir="./tf_log/contra"
-    log_dir="./tf_log/non_contra"
+    log_dir="./tf_log/contra"
+    # log_dir="./tf_log/non_contra"
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
     file_writer = tf.summary.create_file_writer(log_dir + "/metrics")
     file_writer.set_as_default()
@@ -340,7 +340,7 @@ if __name__ == "__main__":
     # Build Model
     model = Contrastive_Net((28,28),class_num,filters)
     net = model.build()
-    # net.add_loss(model.custom_loss()) 
+    net.add_loss(model.custom_loss()) 
 
     # optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
     optimizer = tfa.optimizers.LAMB(learning_rate=lr,weight_decay_rate=1e-6)
