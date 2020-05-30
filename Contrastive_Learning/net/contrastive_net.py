@@ -144,12 +144,23 @@ class Contrastive_Net:
 
 
 
-    def custom_loss(self):
+    # def custom_loss(self,yt,yp):
+    #     x_embd_a,x_embd_b = yp[0],yp[1]
 
 
-        x_embd_contrasive_loss = compute_contrasive_loss(self.x_embd_a,self.x_embd_b)
+    #     # x_embd_contrasive_loss = compute_contrasive_loss(self.x_embd_a,self.x_embd_b)
+    #     x_embd_contrasive_loss = compute_contrasive_loss(x_embd_a,x_embd_b)
 
-        return  x_embd_contrasive_loss
+    #     return  x_embd_contrasive_loss
+    
+    # def custom_cata_loss(self,yt,yp):
+
+    #     logits_a,logits_b = yp[0], yp[1]
+    #     y_a,y_b = yt[0],yt[1]
+    #     logits_concat = tf.concat([logits_a,logits_b],axis=0)
+    #     y_concat = tf.concat([y_a,y_b],axis=0)
+    #     cata_loss = tf.keras.losses.categorical_crossentropy(logits_concat, y_concat, from_logits = True)
+    #     return cata_loss
     
     
         
@@ -168,8 +179,13 @@ class Contrastive_Net:
 
         model_body = self.build_model_body()
         # model_body = self.build_single_body()
-        logits_a, self.x_embd_a = model_body(inputs = self.x_a)
-        logits_b, self.x_embd_b = model_body(inputs = self.x_b)
+        logits_a, x_embd_a = model_body(self.x_a)
+        logits_b, x_embd_b = model_body(self.x_b)
+
+        # print("logits_a",logits_a)
+        # print("logits_b",logits_b)
+        # print("x_embd_a",x_embd_a)
+        # print("x_embd_b",x_embd_b)
 
         '''
         # Try reusing by custom layers. It works, verified by 
@@ -194,7 +210,11 @@ class Contrastive_Net:
 
         
         input_list = [self.x_a,self.x_b]
-        model = tf.keras.Model(inputs = input_list,outputs = [logits_a,logits_b], name = "Contrastive_Net")
+        # model = tf.keras.Model(inputs = input_list,outputs = [(logits_a,logits_b),(x_embd_a,x_embd_b)], name = "Contrastive_Net")
+        concat_embd = tf.concat([x_embd_a,x_embd_b],axis=-1)
+        model = tf.keras.Model(inputs = input_list,outputs = [logits_a,logits_b,concat_embd], name = "Contrastive_Net")
+
+
 
         return model
     
