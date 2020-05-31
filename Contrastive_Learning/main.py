@@ -132,28 +132,30 @@ def make_aug_data_and_dataset(target_data,target_label,fn_list):
     return target_dataset
 
 
+
 def compute_contrasive_loss(vec_a, vec_b):
     '''
     vec: (...,c)
     '''
+    temp = 0.1
     vec_a = tf.reshape(vec_a,[-1,vec_a.shape[-1]]) # (n,c)
     vec_b = tf.reshape(vec_b,[-1,vec_b.shape[-1]])
     # print("vec_a:",vec_a)
     # print("vec_b:",vec_b)
     # print("type(vec_a.shape[-1]):",type(vec_a.shape[-1]))
     vec_ab = tf.concat([vec_a,vec_b],axis=0) # (2n,c)
-    # print("vec_ab:",vec_ab)
-    pairwise_cos_sim = tf.math.exp(tf.keras.losses.cosine_similarity(vec_ab,vec_ab)) # # (2n,1)
-    pairwise_cos_sim = tf.reshape(pairwise_cos_sim,[-1,1])
-    # print("pairwise_cos_sim:",pairwise_cos_sim)
+    normalized_vec_ab = tf.nn.l2_normalize(vec_ab,axis=-1) # (2n,c)
+    pairwise_cos_sim = tf.matmul(normalized_vec_ab,normalized_vec_ab,transpose_b = True)/temp # (2n,2n)
 
-    diagonal_vec = tf.zeros([vec_a.shape[0]*2]) # why there's no error????
+
+    diagonal_vec = tf.zeros([vec_ab.shape[0]]) # why there's no error????
     diagonal_mat = tf.linalg.diag(diagonal_vec, padding_value=1) # 2n,2n
     
-    no_self_matrix = tf.matmul(diagonal_mat,pairwise_cos_sim) # (2n,1)
+    no_self_matrix = tf.multiply(diagonal_mat,pairwise_cos_sim) # (2n,2n)
+    denominator = tf.reduce_sum(tf.math.exp(no_self_matrix))
 
     # print("no_self_matrix:",no_self_matrix)
-    sim_loss = tf.reduce_sum(-1*tf.math.log(tf.math.divide(pairwise_cos_sim,no_self_matrix)))
+    sim_loss = tf.reduce_mean(-1*tf.math.log(tf.math.divide(tf.math.exp(pairwise_cos_sim),denominator)))
     return sim_loss
 
 class Contrastive_Loss(tf.keras.losses.Loss):
@@ -195,7 +197,32 @@ class Custom_Cate_Loss(tf.keras.losses.Loss):
         return cata_loss
 
 
+class Est_Cos_Similarity(tf.keras.metrics.Metric):
 
+    def __init__(self, name='est_similarity', **kwargs):
+        super(Est_Cos_Similarity, self).__init__(name=name, **kwargs)
+
+        self.est_cos_similarity = self.add_weight(name='est_similarity', initializer='zeros')
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+
+        
+        # x_embd_a,x_embd_b = yp[0],yp[1]
+        single_channel = int(y_pred.shape[-1]/2)
+
+        x_embd_a,x_embd_b = y_pred[:,:single_channel],y_pred[:,single_channel:]
+        cosine_simi = tf.reduce_mean(tf.keras.losses.cosine_similarity(x_embd_a,x_embd_b))
+
+        
+        self.est_cos_similarity.assign(cosine_simi)
+        
+
+    def result(self):
+        return self.est_cos_similarity
+
+    def reset_states(self):
+        # The state of the metric will be reset at the start of each epoch.
+        self.est_cos_similarity.assign(0.)
 
 
 
@@ -307,12 +334,14 @@ if __name__ == "__main__":
     contrastive_loss_fn = Contrastive_Loss()
     custom_cate_loss_fn = Custom_Cate_Loss()
 
-
+    metrics = [tf.keras.metrics.CategoricalAccuracy(name='a_accuracy'),\
+                tf.keras.metrics.CategoricalAccuracy(name='b_accuracy'),Est_Cos_Similarity()]
     
     # net.compile(optimizer,loss = [custom_cate_loss_fn,custom_cate_loss_fn,contrastive_loss_fn],loss_weights=[1., 1.,1.])
     net.compile(optimizer,loss = {"model":keras.losses.CategoricalCrossentropy(from_logits=True),\
         "model_1":keras.losses.CategoricalCrossentropy(from_logits=True),\
-            "tf_op_layer_concat":contrastive_loss_fn},loss_weights=[1., 1.,1.])
+            "tf_op_layer_concat":contrastive_loss_fn},loss_weights=[1., 1.,1.],\
+            metrics=metrics)
     
 
 
@@ -320,6 +349,7 @@ if __name__ == "__main__":
 
 
     # This verify that the variables are reused correctly.
+
     for var in net.variables:
         print(var.name)
 
@@ -329,9 +359,10 @@ if __name__ == "__main__":
 
 
 
+    
    
-    # net.fit(x = train_dataset,epochs=epoch_num,validation_data=test_dataset,validation_freq = 5,callbacks = callback_list)
-    net.fit(x = train_dataset,epochs=epoch_num)
+    net.fit(x = train_dataset,epochs=epoch_num,validation_data=test_dataset,validation_freq = 5,callbacks = callback_list)
+    # net.fit(x = train_dataset,epochs=epoch_num)
 
 
 
