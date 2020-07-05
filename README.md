@@ -10,9 +10,12 @@ The experiment is made on mini-imagenet dataset.(If the task is too easy, there 
 
 My experiment shows there's difference on 3 layers convolution network, but no difference for restnet20.
 
-This is result of my experiment:
+This is result of 3 layers conv version, showing improvment with SimCLR:
 
 ![alt text](https://github.com/FinnWeng/ML_units/blob/master/Contrastive_Learning/common/tf_log_image/3layer_conv.PNG "3 layer conv result")
+
+This is resultof of resnet20 version, showing no difference betweeen using SimCLR or not:
+
 ![alt text](https://github.com/FinnWeng/ML_units/blob/master/Contrastive_Learning/common/tf_log_image/resnet20.PNG "resnet20 result")
 
 
