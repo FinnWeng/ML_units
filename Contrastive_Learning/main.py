@@ -2,6 +2,7 @@ import tensorflow as tf
 import tensorflow_addons as tfa
 from net.contrastive_net import Contrastive_Net
 from tensorflow import keras
+from utils.imagenet_loader import MiniImagenetDataset
 import matplotlib.pyplot as plt
 
 import os
@@ -10,90 +11,66 @@ import numpy as np
 import argparse
 
 
+class Augmentation:
+    def __init__(self,IMG_SHAPE):
+        self.IMG_SHAPE = IMG_SHAPE
+
+    def tf_noise_aug(self,input_image):
+        SNR = 0.8
+        max_signal = tf.reduce_max(input_image) # as 1
+        input_shape = self.IMG_SHAPE
+
+        mu, sigma = 0.0, 0.1
+        noise_vector = tf.random.normal([input_shape[0]*input_shape[1]*input_shape[2]],mu,sigma)
+        noise_vector = noise_vector * (max_signal)*(SNR**2)
+        noise_mat = tf.reshape(noise_vector,input_shape)
+
+        noisy_img = input_image + noise_mat
+        noisy_img = tf.round(noisy_img)
+        noisy_img = tf.clip_by_value(noisy_img,0.,1.)
+
+        # noisy_img = skimage.util.random_noise(input_image, mode="gaussian")
+        return noisy_img
 
 
-def tf_noise_aug(input_image):
-    SNR = 0.8
-    max_signal = tf.reduce_max(input_image) # as 1
-    input_shape = [28,28]
-
-    mu, sigma = 0.0, 0.1
-    noise_vector = tf.random.normal([input_shape[0]*input_shape[1]],mu,sigma)
-    noise_vector = noise_vector * (tf.cast(max_signal,dtype=tf.float32))*(SNR**2)
-    noise_mat = tf.reshape(noise_vector,input_shape)
-
-    noisy_img = tf.cast(input_image,dtype=tf.float32) + noise_mat
-    noisy_img = tf.round(noisy_img)
-    noisy_img = tf.clip_by_value(noisy_img,0.,255.)
-
-    # noisy_img = skimage.util.random_noise(input_image, mode="gaussian")
-    return noisy_img
-
-def tf_roll_aug(input_image):
-    x_shift = tf.random.uniform([1],minval=-2,maxval=3,dtype=tf.int32)
-    y_shift = tf.random.uniform([1],minval=-2,maxval=3,dtype=tf.int32)
-
-    shiifted_img = tf.roll(input_image,[y_shift[0],x_shift[0]],axis=[0,1])
-    shiifted_img = tf.cast(shiifted_img,tf.float32)
-
-    return shiifted_img
-
-def tf_random_crop(input_image):
-    # in paper it says crop of random size is (uniform from 0.08 to 1.0 in area)
-    # and random aspect ratio(h,w) 3/4 to 4/3
-    input_image = tf.expand_dims(input_image,axis=-1)
-    
-    bounding_boxes = np.array([[[0,0,1,1]]])
-    CROP_SIZE= np.array([28,28])
-    begin, size, bbox_for_draw = tf.image.sample_distorted_bounding_box(
-            tf.shape(input_image),
-            bounding_boxes=bounding_boxes,
-            min_object_covered=0.5)
-    bbox_for_draw = tf.reshape(bbox_for_draw,[1,4])
-    crop_image = tf.image.crop_and_resize(tf.expand_dims(input_image,axis=0), bbox_for_draw, [0], CROP_SIZE)
-    # Random flipping
-    do_flip = tf.random.uniform([], 0, 1)
-    crop_image = tf.cond(do_flip > 0.5, lambda: tf.image.flip_left_right(crop_image), lambda: crop_image)
-    crop_image = tf.reshape(crop_image,[28,28])
-    
-    return crop_image
-
-def tf_flip_aug(input_image):
-    input_image = tf.reshape(input_image,[28,28,1])
-    flipped = tf.image.flip_left_right(input_image)
-    flipped = tf.reshape(flipped,[28,28])
-    flipped = tf.cast(flipped,tf.float32)
-    return flipped
-
-def tf_color_jitter(input_image):
-    # one can also shuffle the order of following augmentations
-    # each time they are applied.
-    
-    s=0.7
-    # x = tf.reshape(input_image,[28,28,1])
-    x = tf.stack([input_image,input_image,input_image],axis=-1)
-    x = tf.cast(x,dtype=tf.float32)/255
-    x = tf.image.random_brightness(x, max_delta=0.8*s)
-    x = tf.image.random_contrast(x, lower=1-0.8*s, upper=1+0.8*s)
-    x = tf.image.random_saturation(x, lower=1-0.8*s, upper=1+0.8*s)
-    x = tf.image.random_hue(x, max_delta=0.2*s)
-    x = tf.round(x*255)
-    x = tf.clip_by_value(x, 0., 255.)
     
 
-    return x[:,:,0]
 
+    def tf_random_crop(self,input_image):
+        input_image = tf.image.resize(input_image, [int(self.IMG_SHAPE[0]*1.2), int(self.IMG_SHAPE[0]*1.2)])
+        crop_image = tf.image.random_crop(input_image, size=self.IMG_SHAPE)
+        
+        return crop_image
+        
 
+    def tf_flip_aug(self,input_image):
+        input_image = tf.reshape(input_image,IMG_SHAPE)
+        flipped = tf.image.flip_left_right(input_image)
+        flipped = tf.cast(flipped,tf.float32)
+        return flipped
 
+    def tf_color_jitter(self,input_image):
+        # one can also shuffle the order of following augmentations
+        # each time they are applied.
+        
+        x = input_image
+        s=0.7
+        x = tf.image.random_brightness(x, max_delta=0.8*s)
+        x = tf.image.random_contrast(x, lower=1-0.8*s, upper=1+0.8*s)
+        x = tf.image.random_saturation(x, lower=1-0.8*s, upper=1+0.8*s)
+        x = tf.image.random_hue(x, max_delta=0.2*s)
+        x = tf.clip_by_value(x, 0., 1.)
+        
+        return x[:,:,0]
 
 
 
 
     
-def to_one_hot(int_label):
+def to_one_hot(int_label,class_num):
 
 
-    one_hot_label = tf.one_hot(int_label, depth = 10)
+    one_hot_label = tf.one_hot(int_label, depth = class_num)
     
     # return {"data":input["data"],"label":one_hot_label}
 
@@ -102,25 +79,30 @@ def to_one_hot(int_label):
 
 
 
-def make_aug_data_and_dataset(target_data,target_label,fn_list):
+def make_aug_data_and_dataset(IMG_SHAPE,class_num,target_data,target_label,fn_list,using_contrastive):
     target_dataset = 0
+    target_data = target_data.map(lambda x: tf.reshape(x,IMG_SHAPE), tf.data.experimental.AUTOTUNE)
     for i in range(len(fn_list)):
         if i != (len(fn_list) - 1):
             current_start = i
             while current_start + 1 < len(fn_list):
-                print("fn_list[i]:",fn_list[i])
-                # aug_op_out = tf.map_fn(fn_list[i],input_holder,parallel_iterations = 10)
-                a_x = tf.data.Dataset.from_tensor_slices(target_data)
-                b_x = tf.data.Dataset.from_tensor_slices(target_data)
-                a_x = a_x.map(fn_list[i])
-                b_x = b_x.map(fn_list[current_start+1])
+                # for fashionmnist, using this part
+                a_x = target_data
+                b_x = target_data
+                a_x = a_x.map(lambda x: tf.cast(x,tf.float32)/255, tf.data.experimental.AUTOTUNE)
+                b_x = b_x.map(lambda x: tf.cast(x,tf.float32)/255, tf.data.experimental.AUTOTUNE)
+                a_x = a_x.map(fn_list[i], tf.data.experimental.AUTOTUNE)
+                b_x = b_x.map(fn_list[current_start+1], tf.data.experimental.AUTOTUNE)
 
-                label_tmp = tf.data.Dataset.from_tensor_slices(target_label)
-                label_tmp = label_tmp.map(to_one_hot)
+                label_tmp = target_label
+                label_tmp = label_tmp.map(lambda x: to_one_hot(x,class_num), tf.data.experimental.AUTOTUNE)
 
                 x_pair = tf.data.Dataset.zip((a_x,b_x))
-                # y_pair = tf.data.Dataset.zip(((label_tmp,label_tmp),(label_tmp,label_tmp)))
-                y_pair = tf.data.Dataset.zip((label_tmp,label_tmp,label_tmp))
+                
+                if using_contrastive:
+                    y_pair = tf.data.Dataset.zip((label_tmp,label_tmp,label_tmp))
+                else:
+                    y_pair = tf.data.Dataset.zip((label_tmp,label_tmp))
 
                 if target_dataset == 0:
                     target_dataset = tf.data.Dataset.zip((x_pair,y_pair))
@@ -133,6 +115,9 @@ def make_aug_data_and_dataset(target_data,target_label,fn_list):
 
 
 
+
+
+
 def compute_contrasive_loss(vec_a, vec_b):
     '''
     vec: (...,c)
@@ -140,12 +125,13 @@ def compute_contrasive_loss(vec_a, vec_b):
     temp = 0.1
     vec_a = tf.reshape(vec_a,[-1,vec_a.shape[-1]]) # (n,c)
     vec_b = tf.reshape(vec_b,[-1,vec_b.shape[-1]])
-    # print("vec_a:",vec_a)
-    # print("vec_b:",vec_b)
-    # print("type(vec_a.shape[-1]):",type(vec_a.shape[-1]))
+    print("vec_a:",vec_a)
+    print("vec_b:",vec_b)
+    print("type(vec_a.shape[-1]):",type(vec_a.shape[-1]))
     vec_ab = tf.concat([vec_a,vec_b],axis=0) # (2n,c)
     normalized_vec_ab = tf.nn.l2_normalize(vec_ab,axis=-1) # (2n,c)
     pairwise_cos_sim = tf.matmul(normalized_vec_ab,normalized_vec_ab,transpose_b = True)/temp # (2n,2n)
+    print("pairwise_cos_sim:",pairwise_cos_sim)
 
 
     diagonal_vec = tf.zeros([vec_ab.shape[0]]) # why there's no error????
@@ -156,6 +142,7 @@ def compute_contrasive_loss(vec_a, vec_b):
 
     # print("no_self_matrix:",no_self_matrix)
     sim_loss = tf.reduce_mean(-1*tf.math.log(tf.math.divide(tf.math.exp(pairwise_cos_sim),denominator)))
+    print("sim_loss:",sim_loss)
     return sim_loss
 
 class Contrastive_Loss(tf.keras.losses.Loss):
@@ -163,17 +150,15 @@ class Contrastive_Loss(tf.keras.losses.Loss):
         super(Contrastive_Loss,self).__init__(reduction=reduction, name=name)
     
     def __call__(self,yt,yp,sample_weight=None):
-        print("contra_yt",yt)
-        print("contra_yp",yp)
+        # print("contra_yt",yt)
+        # print("contra_yp",yp)
 
         # x_embd_a,x_embd_b = yp[0],yp[1]
         single_channel = int(yp.shape[-1]/2)
 
+
         x_embd_a,x_embd_b = yp[:,:single_channel],yp[:,single_channel:]
-        
 
-
-        
         x_embd_contrasive_loss = compute_contrasive_loss(x_embd_a,x_embd_b) # some problem for gradient passing
         # x_embd_contrasive_loss = tf.keras.losses.cosine_similarity(x_embd_a,x_embd_b)# it works
 
@@ -237,21 +222,35 @@ if __name__ == "__main__":
 
     # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
   
-
     data_enlarge_scale = 1 # 1920 *n
-
     epoch_num = 500
     batch_size = 32
-    
-    class_num = 10
     drop_rt = 0.2
     lr = 1e-4
+    # filters = 8
+    filters = 32
+    shuffle_buffer_size = 48000
 
-     
-    filters = 8
+    # imagenet setting:
+    imagenet_csv_path = "../seg_and_depth_estimation/dataset/mini_imagenet/mini-imagenet-tools"
+    imagenet_data_path = "../seg_and_depth_estimation/dataset/mini_imagenet/images/"
+    IMG_SHAPE = (64,64,3)
+    class_num = 100
+
+    # optimizer = tfa.optimizers.LAMB(learning_rate=lr,weight_decay_rate=1e-6)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
+
+    # # fashion mnist setting
+    # IMG_SHAPE = (28,28,1)
+    # class_num = 10
+
+
+
+
 
     # fn_list = [tf_noise_aug,tf_roll_aug,tf_flip_aug,tf_color_jitter]
-    fn_list = [tf_noise_aug,tf_random_crop,tf_color_jitter]
+    AUG = Augmentation(IMG_SHAPE)
+    fn_list = [AUG.tf_noise_aug,AUG.tf_random_crop,AUG.tf_color_jitter]
 
     
     # tf.compat.v1.disable_eager_execution()
@@ -260,7 +259,7 @@ if __name__ == "__main__":
     gpus = tf.config.experimental.list_physical_devices('GPU')
     
     print(gpus)
-    tf.config.experimental.set_visible_devices(gpus[0], 'GPU')
+    tf.config.experimental.set_visible_devices(gpus[1], 'GPU')
     if gpus:
         # Currently, memory growth needs to be the same across GPUs
         for gpu in gpus:
@@ -268,25 +267,28 @@ if __name__ == "__main__":
 
 
     log_dir="./tf_log/contra"
-    # log_dir="./tf_log/non_contra"
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
-    file_writer = tf.summary.create_file_writer(log_dir + "/metrics")
-    file_writer.set_as_default()
+    # file_writer = tf.summary.create_file_writer(log_dir + "/metrics")
+    # file_writer.set_as_default()
 
     save_model_callback = tf.keras.callbacks.ModelCheckpoint(
         filepath='./model/Contrastive_Learning_TF2.ckpt',
-        # Path where to save the model
-        # The two parameters below mean that we will overwrite
-        # the current checkpoint if and only if
-        # the `val_loss` score has improved.
-        # save_best_only=True,
-        # monitor='val_acc',
         save_weights_only= True,
-        # monitor='val_categorical_accuracy',
         verbose=1)
     
+    contrastive_callback_list = [tensorboard_callback,save_model_callback]
 
-    callback_list = [tensorboard_callback,save_model_callback]
+
+    log_dir="./tf_log/non_contra"
+    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
+    # file_writer = tf.summary.create_file_writer(log_dir + "/metrics")
+    # file_writer.set_as_default()
+
+    save_model_callback = tf.keras.callbacks.ModelCheckpoint(
+        filepath='./model/non_Contrastive_Learning_TF2.ckpt',
+        save_weights_only= True,
+        verbose=1)
+    non_contrastive_callback_list = [tensorboard_callback,save_model_callback]
 
 
 
@@ -309,67 +311,130 @@ if __name__ == "__main__":
     # print(np.max(train_images[0])) # 255
 
 
- 
-
     '''
-    Do augmentation and build model by functional API 
+    For contrastive learning
     '''
 
-    train_dataset = make_aug_data_and_dataset(train_images,train_labels,fn_list)
-    train_dataset = train_dataset.shuffle(buffer_size=128,reshuffle_each_iteration=True).batch(batch_size, drop_remainder=True)
-    train_dataset = train_dataset.prefetch(batch_size)
+    # for fashion mnist:
+    # train_dataset = make_aug_data_and_dataset(IMG_SHAPE,class_num,tf.data.Dataset.from_tensor_slices(train_images),\
+    # #     tf.data.Dataset.from_tensor_slices(train_labels),fn_list)
+    # # test_dataset = make_aug_data_and_dataset(IMG_SHAPE,class_num,tf.data.Dataset.from_tensor_slices(test_images),\
+    # #     tf.data.Dataset.from_tensor_slices(test_labels),fn_list)
+    
+    # # for mini imagenet:
+    MID_loader  = MiniImagenetDataset(batch_size,IMG_SHAPE,imagenet_csv_path,imagenet_data_path)
+    label_tmp = tf.data.Dataset.from_tensor_slices(MID_loader.train_label_list)
+    x_tmp = tf.data.Dataset.from_tensor_slices(MID_loader.train_filename_list)
+    x_tmp = x_tmp.map(MID_loader.read_line_and_parse, tf.data.experimental.AUTOTUNE)
+    x_tmp = x_tmp.map(MID_loader.crop_and_resize_image, tf.data.experimental.AUTOTUNE)
+    val_label_tmp = tf.data.Dataset.from_tensor_slices(MID_loader.val_label_list)
+    val_x_tmp = tf.data.Dataset.from_tensor_slices(MID_loader.val_filename_list)
+    val_x_tmp = val_x_tmp.map(MID_loader.read_line_and_parse, tf.data.experimental.AUTOTUNE)
+    val_x_tmp = val_x_tmp.map(MID_loader.crop_and_resize_image, tf.data.experimental.AUTOTUNE)
 
-    test_dataset = make_aug_data_and_dataset(test_images,test_labels,fn_list)
+    train_dataset = make_aug_data_and_dataset(IMG_SHAPE,class_num,x_tmp,\
+        label_tmp,fn_list,using_contrastive=True)
+    test_dataset = make_aug_data_and_dataset(IMG_SHAPE,class_num,val_x_tmp,\
+        val_label_tmp,fn_list,using_contrastive=True)
+
+    # # for common shuffle and prefetch
+    train_dataset = train_dataset.shuffle(buffer_size=shuffle_buffer_size,reshuffle_each_iteration=True).batch(batch_size, drop_remainder=True)
+    train_dataset = train_dataset.prefetch(tf.data.experimental.AUTOTUNE)
     test_dataset = test_dataset.shuffle(buffer_size=128).batch(batch_size, drop_remainder=True)
-    test_dataset = test_dataset.prefetch(batch_size)
+    test_dataset = test_dataset.prefetch(tf.data.experimental.AUTOTUNE)
+
 
     # Build Model
-    model = Contrastive_Net((28,28),class_num,filters)
-    net = model.build()
-    # net.add_loss(model.custom_loss()) 
+    model = Contrastive_Net(IMG_SHAPE,class_num,filters)
+    net = model.build(using_contrastive = True)
 
-    # optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
-    optimizer = tfa.optimizers.LAMB(learning_rate=lr,weight_decay_rate=1e-6)
-    # net.compile(optimizer,loss = lambda yt, yp: tf.keras.losses.categorical_crossentropy(yt, yp, from_logits = True),metrics= [tf.keras.metrics.CategoricalAccuracy()])
+    
     contrastive_loss_fn = Contrastive_Loss()
     custom_cate_loss_fn = Custom_Cate_Loss()
 
     metrics = [tf.keras.metrics.CategoricalAccuracy(name='a_accuracy'),\
                 tf.keras.metrics.CategoricalAccuracy(name='b_accuracy'),Est_Cos_Similarity()]
     
-    # net.compile(optimizer,loss = [custom_cate_loss_fn,custom_cate_loss_fn,contrastive_loss_fn],loss_weights=[1., 1.,1.])
-    net.compile(optimizer,loss = {"model":keras.losses.CategoricalCrossentropy(from_logits=True),\
-        "model_1":keras.losses.CategoricalCrossentropy(from_logits=True),\
-            "tf_op_layer_concat":contrastive_loss_fn},loss_weights=[1., 1.,1.],\
+
+    
+    
+    net.compile(optimizer,loss = [keras.losses.CategoricalCrossentropy(from_logits=True),\
+        keras.losses.CategoricalCrossentropy(from_logits=True),\
+            contrastive_loss_fn],loss_weights=[1., 1.,1.],\
             metrics=metrics)
-    
-
-
-    net.summary()
-
-
-    # This verify that the variables are reused correctly.
-
-    for var in net.variables:
-        print(var.name)
-
-    # result = net.predict(x=train_dataset,batch_size=1,steps=1)
-    # print(result[0][1].shape)
-    # print(result[1][1].shape)
 
 
 
-    
+    # net.summary()
+
+
+    # # This verify that the variables are reused correctly.
+
+    # for var in net.variables:
+    #     print(var.name)
+
    
-    net.fit(x = train_dataset,epochs=epoch_num,validation_data=test_dataset,validation_freq = 5,callbacks = callback_list)
-    # net.fit(x = train_dataset,epochs=epoch_num)
+    net.fit(x = train_dataset,epochs=epoch_num,validation_data=test_dataset,validation_freq = 5,callbacks = contrastive_callback_list)
 
 
 
-
-
+    '''
+    for non contrastive learning
+    '''
+#     # # for fashion mnist:
+#     # train_dataset = make_aug_data_and_dataset(IMG_SHAPE,class_num,tf.data.Dataset.from_tensor_slices(train_images),\
+#     #     tf.data.Dataset.from_tensor_slices(train_labels),fn_list)
+#     # test_dataset = make_aug_data_and_dataset(IMG_SHAPE,class_num,tf.data.Dataset.from_tensor_slices(test_images),\
+#     #     tf.data.Dataset.from_tensor_slices(test_labels),fn_list)
     
+#     # for mini imagenet:
+#     MID_loader  = MiniImagenetDataset(batch_size,IMG_SHAPE,imagenet_csv_path,imagenet_data_path)
+#     label_tmp = tf.data.Dataset.from_tensor_slices(MID_loader.train_label_list)
+#     x_tmp = tf.data.Dataset.from_tensor_slices(MID_loader.train_filename_list)
+#     x_tmp = x_tmp.map(MID_loader.read_line_and_parse, tf.data.experimental.AUTOTUNE)
+#     x_tmp = x_tmp.map(MID_loader.crop_and_resize_image, tf.data.experimental.AUTOTUNE)
+#     val_label_tmp = tf.data.Dataset.from_tensor_slices(MID_loader.val_label_list)
+#     val_x_tmp = tf.data.Dataset.from_tensor_slices(MID_loader.val_filename_list)
+#     val_x_tmp = val_x_tmp.map(MID_loader.read_line_and_parse, tf.data.experimental.AUTOTUNE)
+#     val_x_tmp = val_x_tmp.map(MID_loader.crop_and_resize_image, tf.data.experimental.AUTOTUNE)
 
+#     train_dataset = make_aug_data_and_dataset(IMG_SHAPE,class_num,x_tmp,\
+#         label_tmp,fn_list,using_contrastive=False)
+#     test_dataset = make_aug_data_and_dataset(IMG_SHAPE,class_num,val_x_tmp,\
+#         val_label_tmp,fn_list,using_contrastive=False)
 
+#     # for common shuffle and prefetch
+#     train_dataset = train_dataset.shuffle(buffer_size=shuffle_buffer_size,reshuffle_each_iteration=True).batch(batch_size, drop_remainder=True)
+#     train_dataset = train_dataset.prefetch(tf.data.experimental.AUTOTUNE)
+#     test_dataset = test_dataset.shuffle(buffer_size=128).batch(batch_size, drop_remainder=True)
+#     test_dataset = test_dataset.prefetch(tf.data.experimental.AUTOTUNE)
+#     # Build Model
+#     model = Contrastive_Net(IMG_SHAPE,class_num,filters)
+#     net = model.build(using_contrastive = False)
 
+#     net.summary()
 
+#     # for var in net.variables:
+#     #     print(var.name)
+
+#     custom_cate_loss_fn = Custom_Cate_Loss()
+
+#     metrics = [tf.keras.metrics.CategoricalAccuracy(name='a_accuracy'),\
+#                 tf.keras.metrics.CategoricalAccuracy(name='b_accuracy')]
+
+#     net.compile(optimizer,loss = {"model":keras.losses.CategoricalCrossentropy(from_logits=True),\
+#         "model_1":keras.losses.CategoricalCrossentropy(from_logits=True)\
+#             },loss_weights=[1., 1.],\
+#             metrics=metrics)
+
+#     net.fit(x = train_dataset,epochs=epoch_num,validation_data=test_dataset,validation_freq = 5,callbacks = non_contrastive_callback_list)
+# #
+# #
+# #
+# #
+# #
+#    
+#
+#
+#
+# #
